@@ -58,6 +58,19 @@ _FIELDS = (
 )
 
 
+def _attr(obj: Any, *names: str) -> Any:
+    """Read a field from either a dict or a pydantic/object (apify-client 1.x vs 2.x)."""
+    for n in names:
+        if isinstance(obj, dict):
+            if n in obj:
+                return obj[n]
+        else:
+            v = getattr(obj, n, None)
+            if v is not None:
+                return v
+    return None
+
+
 def _normalize(item: dict[str, Any]) -> dict[str, Any]:
     return {k: item.get(k) for k in _FIELDS if item.get(k) is not None}
 
@@ -139,9 +152,11 @@ def _search(
 
     client = ApifyClient(APIFY_TOKEN)
     run = client.actor(ACTOR_ID).call(run_input=run_input)
-    if not run or not run.get("defaultDatasetId"):
-        return {"listings": [], "note": "No results (actor run failed)."}
-    items = client.dataset(run["defaultDatasetId"]).list_items(limit=capped).items
+    dataset_id = _attr(run, "defaultDatasetId", "default_dataset_id")
+    if not dataset_id:
+        return {"listings": [], "note": "No results (actor run produced no dataset)."}
+    page = client.dataset(dataset_id).list_items(limit=capped)
+    items = _attr(page, "items") or (page if isinstance(page, list) else [])
     listings = [_normalize(i) for i in items][:capped]
     return {
         "listings": listings,
